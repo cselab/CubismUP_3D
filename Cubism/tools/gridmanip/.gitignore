@@ -1,0 +1,8 @@
+gridmanip
+*.o
+*.a
+*~
+*.swp
+*.bak
+*.h5
+*.xmf

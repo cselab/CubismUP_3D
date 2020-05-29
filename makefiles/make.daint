@@ -1,0 +1,22 @@
+CXX=CC
+LD=CC
+
+ACCFFT_ROOT=../accfft/build/
+accfft?=true
+
+ifeq "$(compiler)" "intel"
+#CPPFLAGS += -dynamic
+else
+#CPPFLAGS += -static
+endif
+
+ifeq "$(hypre)" "true"
+CPPFLAGS+= -I/users/novatig/hypre/build/include/
+LIBS+= -L/users/novatig/hypre/build/lib/
+endif
+
+ifeq "$(accfft)" "true"
+LIBS += $(CRAY_CUDATOOLKIT_POST_LINK_OPTS)
+endif
+
+#CPPFLAGS += -DCUP_ASYNC_DUMP

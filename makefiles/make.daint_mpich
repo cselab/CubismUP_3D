@@ -1,0 +1,15 @@
+CXX=/users/novatig/mpich-3.2/build/bin/mpic++
+LD=/users/novatig/mpich-3.2/build/bin/mpic++
+CPPFLAGS+= -I/users/novatig/mpich-3.2/build/include/
+export LD_LIBRARY_PATH=/users/novatig/mpich-3.2/build/lib/:$LD_LIBRARY_PATH
+LIBS+= -L/users/novatig/mpich-3.2/build/lib/
+accfft-inc = /users/novatig/accfft/build_again/include/
+accfft-lib = /users/novatig/accfft/build_again/lib/ 
+#fftw-inc = /opt/fftw/3.3.4.0/sandybridge/include/
+#fftw-lib = /opt/fftw/3.3.4.0/sandybridge/lib/
+#hdf-inc = ${HDF5_DIR}/include
+#hdf-lib = ${HDF5_DIR}/lib
+NVFLAGS += -I/opt/cray/pe/fftw/3.3.4.10/haswell/include
+#CPPFLAGS += -I$(CRAY_MPICH2_DIR)/include/
+#ISPCFLAGS += --arch=x86-64
+#LIBS += -L$(CRAY_MPICH2_DIR)/lib/ -lmpich -lmpichcxx

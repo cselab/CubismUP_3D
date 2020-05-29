@@ -1,0 +1,1170 @@
+<!doctype html>
+
+<!--
+If you don't know what to do:
+TODO: Add a note that internet connection is required (for CSS/JS files).
+TODO: xyz bForcedInSimFrame and bFixFrameOfRef.
+TODO: Write the size of the domain in "Information".
+TODO: (hard) Refactor MultiValueField to be ControlField, not a ContainerField.
+-->
+
+<!--
+This page uses alpacajs as a main library, which enables us to generate the
+form using a simple JSON description.
+
+However, any customization is tricky. Here are listed some library behavior
+and our implementation details:
+
+1) Working with custom templates.
+There must be a single HTML tag encapsulating everything inside a template.
+Whatever is outside it, e.g. some text, will be ignored.
+
+2) Containers vs controls.
+Each field is either a ContainerField or a ControlField. Examples of
+ContainerFields are "object" and "array", and they contain other fields. A
+ControlField is simply a "text", "number" etc. There is a difference in
+visualization of these two, they use different sets of templates.
+
+3) Our MultiValueField custom field type is derived from "array", which makes
+it a container, not a control that we want visually. Therefore, we have a bunch
+of hacks to display it as if it were a control (in particular, custom
+templates). The reason we use array is to have automatic support for multiple
+inner fields. It was not clear to me how to create multiple input (textboxes)
+inside a single ControlField, together with listeners attached and retrieving
+the values. Reading the source code, it looks like one should use nested forms
+(i.e. $().alpaca(...)). Feel free to refactor it. (kicici)
+
+4) Custom views.
+A view defines how to render the fields. It is not clear if field-specific
+views are possible. As few different attempts failed, we use now a global
+custom view (which derives from "bootstrap-edit-horizontal"). The view
+overrides some callbacks ("control" and "container"), and acts only on our
+custom fields. Anything else is forwarded to the parent view.
+-->
+
+<html>
+<head>
+  <title>CubismUP_3D config file generator</title>
+  <script type="text/javascript" src="https://code.jquery.com/jquery-1.11.1.min.js"></script>
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/handlebars.js/4.0.5/handlebars.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/default.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/highlight.min.js"></script>
+  <link type="text/css" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/css/bootstrap.min.css" rel="stylesheet"/>
+  <script type="text/javascript" src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.1/js/bootstrap.min.js"></script>
+  <link type="text/css" href="https://code.cloudcms.com/alpaca/1.5.24/bootstrap/alpaca.min.css" rel="stylesheet"/>
+  <script type="text/javascript" src="https://code.cloudcms.com/alpaca/1.5.24/bootstrap/alpaca.js"></script>
+  <style>
+    @media (min-width: 1440px) {
+      .container {
+        width: 1200px;
+      }
+    }
+    .alpaca-layout-binding-holder {
+        margin-bottom: 1em;  /* Put form sections apart. */
+    }
+    .inline-help-block {
+        margin: 0px;
+    }
+    .alpaca-message-custom {
+        /* This appears for multivalue errors.
+         * No idea if appears also in other cases. */
+        color: #a94442;
+    }
+    .multivalue .alpaca-container {
+        display: table-row;
+    }
+    .multivalue .alpaca-container-item {
+        display: table-cell;
+    }
+    .multivalue .alpaca-container-item > div {
+        display: inline-block;
+    }
+    .form-horizontal .multivalue .form-group {
+        margin-bottom: 5px;
+        margin-left: 3px;
+        margin-right: 3px;
+    }
+    .form-horizontal .multivalue .alpaca-container-item:nth-child(2) .form-group { margin-left: 0px; }
+    .form-horizontal .multivalue .alpaca-container-item:last-child .form-group { margin-right: 0px; }
+    .formula {
+        font-family: serif;
+    }
+  </style>
+</head>
+<body>
+
+
+<!-- Basic structure of the website. -->
+<div class="container">
+  <div id="form"></div>
+  <br>
+  <div>
+    <!-- Buttons "Save", "Load config" and presets. -->
+    <div id="preset-container" style="float: right;"></div>
+    <button type="button" class="btn btn-primary" id="download-config">Save as file</button>
+    <button type="button" class="btn btn-default" data-toggle="modal" data-target="#load-config-modal">Load config</button>
+  </div>
+  <br><br>
+  <div>
+    <h3>Information</h3>
+    <div id="config-info"></div>
+  </div>
+  <br>
+  <div>
+    <h3>Run script</h3>
+    <p>
+      If running on a single node (e.g. a laptop), simply copy-paste and run the script below.<br>
+      To run on supercomputing clusters, modify the <code>JOB PHASE</code> section to submit the job that runs the automatically generated <code>./job.sh</code> with <code>${RESULT_PATH}</code> as the execution folder.
+    </p>
+    <pre class="bash" id="config-file"></pre>
+  </div>
+</div>
+
+
+<!-- "Load config" modal. -->
+<div class="modal fade" id="load-config-modal" tabindex="-1" role="dialog" aria-labelledby="load-config-modal-label">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        <h4 class="modal-title" id="load-config-modal-label">Load existing config</h4>
+      </div>
+      <div class="modal-body">
+        <p>To load previously created settings file, copy-paste its last line, containing the JSON representation of all settings.</p>
+        <form>
+          <div class="form-group">
+            <label for="load-config-json" class="control-label">JSON:</label>
+            <textarea class="form-control" id="load-config-json" rows="8"></textarea>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="load-config-update">Update form</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Preset buttons. -->
+<script type="text/x-handlebars-template" id="preset-template">
+  {{#each presets}}
+    <button type="button" class="preset btn btn-default" data-index="{{@index}}" title="{{description}}">
+      Preset #{{index1}}
+    </button>
+  {{/each}}
+</script>
+
+
+<!-- Two column layout. -->
+<script type="text/x-handlebars-template" id="two-column-layout-template">
+  <div class="row">
+    <div class="col-md-12">
+      {{#if options.label}}<h3>{{options.label}}</h3>{{/if}}
+      {{#if options.helper}}<h4>{{options.helper}}</h4>{{/if}}
+    </div>
+    <div class="col-md-6" id="leftcolumn"></div>
+    <div class="col-md-6" id="rightcolumn"></div>
+  </div>
+</script>
+
+
+<!-- "Information" section template. -->
+<script type="text/x-handlebars-template" id="config-info-template">
+  Domain extent: {{{domain}}}<br>
+  {{#if dump_info}}
+    <br>
+    Snapshot size: {{dump_info.snapshot_size}}<br>
+    Number of snapshot: {{dump_info.snapshot_count}}<br>
+    Total snapshot size: <b>{{dump_info.snapshot_total_size}}</b><br>
+    <br>
+  {{/if}}
+  Estimated Reynolds number: <b>{{Re}}</b> {{{Re_desc}}}<br>
+</script>
+
+
+<!-- Modified version of alpaca/src/templates/bootstrap-edit/control.html -->
+<!-- Used for INLINE_CHECKBOX option (for inlining helper with checkboxes). -->
+<script type="text/x-handlebars-template" id="control-inline-helper-template">
+  <div class="form-group">
+    {{#if options.label}}
+      <label class="{{#if options.labelClass}}{{options.labelClass}}{{/if}} col-sm-3 control-label alpaca-control-label" for="{{id}}">{{{options.label}}}</label>
+    {{/if}}
+    <div class="col-sm-1">
+      {{#control}}{{/control}}
+    </div>
+    <div class="col-sm-8">
+      {{#if options.helpers}}
+        {{#each options.helpers}}
+          <p class="help-block inline-help-block {{#if options.helperClass}}{{options.helperClass}}{{/if}}">
+            <i class="glyphicon glyphicon-info-sign"></i>
+            {{#showMessage .}}{{/showMessage}}
+          </p>
+        {{/each}}
+      {{/if}}
+    </div>
+  </div>
+</script>
+
+
+<!-- Template for MultiValueField item (simplified container-array-item).
+     This template displays the container item as a small "control item".
+     Note that the actionbars were removed. -->
+<script type="text/x-handlebars-template" id="container-multivalue-item-template">
+  <div>
+    {{#itemField}}{{/itemField}}
+  </div>
+</script>
+
+<!-- Template for MultiValueField (simplified container.html).
+     This template displays the MultiValueField container as a control. -->
+<script type="text/x-handlebars-template" id="container-multivalue-template">
+  <div class="multivalue">
+    {{#if options.label}}
+      <label class="{{#if options.labelClass}}{{options.labelClass}}{{/if}} control-label alpaca-control-label">{{{options.label}}}</label>
+    {{/if}}
+
+    {{#container}}{{/container}}
+
+    {{#if options.helpers}}
+      {{#each options.helpers}}
+        <p class="help-block {{#if options.helperClass}}{{options.helperClass}}{{/if}}">
+          <i class="glyphicon glyphicon-info-sign"></i>
+          {{#showMessage .}}{{/showMessage}}
+        </p>
+      {{/each}}
+    {{/if}}
+  </div>
+</script>
+
+
+<!-- JavaScript code: the logic of the website. -->
+<script type="text/javascript">
+(function(){
+    var PRESETS = [{
+        "description": "Flow around a sphere at Re=100.",
+        "data": '{"simulation":{"num_nodes":64,"result_path":"results/sphere-100","num_cells":[2048,1536,1536],"tend":20,"tdump":1.0},"flow":{"nu":0.00005},"advanced":{"root_path":".."},"obstacles":[{"obstacle_type":"Sphere","center":[0.25,0.375,0.375],"radius":0.025,"obstacle_forced":"true","obstacle_vel":[0.1,0,0],"obstacle_frame_fixed":"true"}]}',
+    }, {
+        "description": "Towed fish at Re=5000.",
+        "data": '{"simulation":{"num_nodes":80,"result_path":"results/towedFish","num_cells":[2560,1280,1280],"tend":10,"tdump":0.5},"flow":{"nu":0.00002},"advanced":{"root_path":".."},"obstacles":[{"obstacle_type":"Fish","center":[0.35,0.25,0.25],"length":0.2,"fish_motion_type":"towed","fish_width_profile":"danio","fish_height_profile":"danio","obstacle_forced":"true","obstacle_vel":[0.5,0,0],"obstacle_frame_fixed":"true"}]}',
+    }, {
+        "description": "Swimmer at Re=560.",
+        "data": '{"simulation":{"num_nodes":16,"result_path":"results/swimmer","num_cells":[2048,512,512],"tend":30,"tdump":0.2},"flow":{"nu":0.00002666666667},"advanced":{"root_path":".."},"obstacles":[{"obstacle_type":"Fish","center":[0.35,0.125,0.125],"length":0.2,"fish_motion_type":"carling","fish_T":1,"fish_width_profile":"danio","fish_height_profile":"danio","fish_fix_xy_plane":"true","obstacle_frame_fixed":"true"}]}',
+    }];
+
+    // Compile-time settings and other parameters.
+    var BLOCK_SIZE = 16;
+    var BYTES_PER_CELL = 4 * 4;
+    var ROOT_PATH_DEFAULT = "..";
+
+    // Internal variables and enums.
+    var CUBISM_NAME = "CubismUP_3D";
+    var SPHERE = "Sphere";
+    var CYLINDER = "Cylinder";
+    var NACA = "NACA";
+    var FISH = "Fish";
+    var FISH_MOTION_TYPES = {
+        "carling": "Displacement-based",
+        "stefan": "Curvature-based",
+        "towed": "Towed",
+    };
+    var FISH_WIDTH_PROFILES = {
+        "danio": "Danio",
+        "baseline": "baseline",
+        "naca0012": "NACA 0012",
+    };
+    var FISH_HEIGHT_PROFILES = {
+        "danio": "Danio",
+        "baseline": "baseline",
+        "largefin": "largefin",
+        "tunaclone": "tuna",
+        "naca0012": "NACA 0012",
+    };
+    var CONFIG_INFO_TEMPLATE = Handlebars.compile($("#config-info-template").html());
+
+    // Internal state variables.
+    var form_control = null;
+
+    // Generate presets.
+    var PRESET_TEMPLATE = Handlebars.compile($("#preset-template").html());
+    for (var i = 0; i < PRESETS.length; ++i)
+        PRESETS[i]["index1"] = i + 1;
+    $("#preset-container").html(PRESET_TEMPLATE({"presets": PRESETS}));
+    $('.preset').click(function() {
+        var index = parseInt($(this).attr('data-index'));
+        var json = JSON.parse(PRESETS[index]["data"]);
+        reset_form(json);
+    });
+    $('.preset').tooltip()
+
+    // https://stackoverflow.com/questions/1779858/how-do-i-escape-a-string-for-a-shell-command-in-node/22827128#22827128
+    var escape_shell = function(str) {
+        return "'" + str.replace(/'/g, "'\\''") + "'";
+    };
+
+    /*
+     * Get values of an object, in the same order as Object.keys().
+     *
+     * (Replacement for Object.entries, which is not yet widely supported.)
+     */
+    var get_values = function(x) {
+        var keys = Object.keys(x);
+        var values = [];
+        for (var i = 0; i < keys.length; ++i)
+            values.push(x[keys[i]]);
+        return values;
+    }
+
+    /*
+     * Returns if the value is well defined.
+     *
+     * Check if a value is either a not-NaN number, or a recursive array
+     * of well defined values.
+     */
+    var is_ok = function(x) {
+        if (Array.isArray(x)) {
+            for (var i = 0; i < x.length; ++i)
+                if (!is_ok(x[i]))
+                    return false;
+            return true;
+        } else {
+            return typeof(x) === "number" && !(x !== x);
+        }
+    };
+
+    /* Generate config file from form values. */
+    var current_config = '';
+    var update_config = function(value) {
+        // We use "obstacle" instead of "object" keyword to differentiate
+        // between our objects and built-in objects.
+        var obstacles = value["obstacles"];
+        var simulation = value["simulation"];
+        var flow = value["flow"];
+
+        var pre = "";
+        pre += "#!/bin/bash\n\n";
+        pre += "set -e\n\n";
+        pre += "RESULT_PATH=" + simulation["result_path"] + "\n";
+        pre += "\n";
+
+        pre += "############################################################\n";
+        pre += "# PREPARATION PHASE\n";
+        pre += "############################################################\n";
+        // https://stackoverflow.com/questions/15783701/which-characters-need-to-be-escaped-in-bash-how-do-we-know-it/20053121#20053121
+
+        if (simulation["root_path"]) {
+            pre += "ROOT_PATH=" + simulation["root_path"] + "\n";
+        } else {
+            pre += "ROOT_PATH=" + ROOT_PATH_DEFAULT + "\n";
+        }
+
+        pre += "\n";
+        pre += "# Prepare target folder. Copy executable and backup the source code.\n";
+        pre += "mkdir -p ${RESULT_PATH}/backup\n";
+        pre += "cp -r ${ROOT_PATH}/source ${ROOT_PATH}/Cubism ${RESULT_PATH}/backup\n";
+        pre += "cp ${ROOT_PATH}/bin/Swim3D ${RESULT_PATH}    # Copy executable.\n";
+        pre += "cp ${BASH_SOURCE} ${RESULT_PATH}/backup || true  # Copy the script itself.\n";
+        pre += "\n";
+
+
+        /* Simulation setup */
+        var job = "";
+        job += "#!/bin/bash\n\n";
+        job += "set -e\n\n";
+        var bpdx = simulation["num_cells"][0] / BLOCK_SIZE;
+        var bpdy = simulation["num_cells"][1] / BLOCK_SIZE;
+        var bpdz = simulation["num_cells"][2] / BLOCK_SIZE;
+        var tend = simulation["tend"];
+        var tdump = simulation["tdump"];
+        job += "OPTIONS=\n";
+        job += "OPTIONS+=\" -bpdx " + bpdx + "\"\n";
+        job += "OPTIONS+=\" -bpdy " + bpdy + "\"\n";
+        job += "OPTIONS+=\" -bpdz " + bpdz + "\"\n";
+        job += "OPTIONS+=\" -nu " + flow["nu"] + "\"\n";
+        job += "OPTIONS+=\" -tend " + tend + "\"\n";
+        if (tdump > 0)
+            job += "OPTIONS+=\" -tdump " + tdump + "\"\n";
+        if (flow["periodic_z"])
+            job += "OPTIONS+=\" -periodicz 1\"";
+
+        /* Obstacles (FACTORY) */
+        var Re = -1;
+        var Re_desc = "";  // Wrt what object is this Reynold number?
+        var check_Re = function(curr, formula, params) {
+            if (curr > Re) {
+                Re = curr;
+                Re_desc = " <span style=\"color:gray\">(With respect to the object #" + (i + 1)
+                        + " at (" + params["xpos"] + ", " + params["ypos"] + ", " + params["zpos"] + "), calculated using " + formula + ")</span>";
+            }
+        };
+
+        var factory = "";
+        for (var i = 0, len = obstacles.length; i < len; ++i) {
+            var o = obstacles[i];
+            var name = "";
+            var error = null;
+            var params = {};
+
+            /* Obstacle-specific parameters */
+            var type = o["obstacle_type"];
+
+            /* Position */
+            if (type == SPHERE || type == NACA || type == FISH) {
+                var c = o["center"];
+                if (is_ok(c)) {
+                    params["xpos"] = c[0];
+                    params["ypos"] = c[1];
+                    params["zpos"] = c[2];
+                } else {
+                    error = "Center position not specified.";
+                }
+            }
+            if (type == CYLINDER) {
+                var c = o["cylinder_center"];
+                if (is_ok(c)) {
+                    params["xpos"] = c[0];
+                    params["ypos"] = c[1];
+                } else {
+                    error = "Center position not specified.";
+                }
+                var zz = o["cylinder_z_range"];
+                if (is_ok(zz)) {
+                    params["zpos"] = .5 * (zz[0] + zz[1]);
+                    params["halflength"] = .5 * Math.abs(zz[1] - zz[0]);
+                } else {
+                    error = "Cylinder Z range not specified."
+                }
+            }
+
+            /* Length and radius */
+            if (type == SPHERE || type == CYLINDER) {
+                if (o["radius"])
+                    params["L"] = 2 * o["radius"];
+                else
+                    error = "Radius not specified or zero!";
+            }
+            if (type == NACA || type == FISH) {
+                if (o["length"])
+                    params["L"] = o["length"];
+                else
+                    error = "Length not specified or zero!";
+            }
+
+            /* Name */
+            switch(type) {
+                case SPHERE: name = "Sphere"; break;
+                case CYLINDER: name = "Cylinder"; break;
+                case NACA: name = "NacaOperator"; break;
+                case FISH: /* see below */ break;
+                default: error = "Unknown type??"; break;
+            };
+
+            /* NACA */
+            if (type == NACA) {
+                if (o["NACA_thickness"])
+                    params["thickness"] = o["NACA_thickness"];
+                else
+                    error = "NACA thickness not specified or zero!";
+
+                if (is_ok(o["NACA_Apitch"])) params["Apitch"] = o["NACA_Apitch"];
+                if (is_ok(o["NACA_Fpitch"])) params["Fpitch"] = o["NACA_Fpitch"];
+                if (is_ok(o["NACA_Ppitch"])) params["Ppitch"] = o["NACA_Ppitch"];
+                if (is_ok(o["NACA_Mpitch"])) params["Mpitch"] = o["NACA_Mpitch"];
+                if (is_ok(o["NACA_Fheave"])) params["Fheave"] = o["NACA_Fheave"];
+                if (is_ok(o["NACA_Aheave"])) params["Aheave"] = o["NACA_Aheave"];
+            }
+
+            /* Fish */
+            if (type == FISH) {
+                params["widthProfile"] = o["fish_width_profile"];
+                params["heightProfile"] = o["fish_height_profile"];
+                params["T"] = is_ok(o["fish_T"]) ? o["fish_T"] : 1.0;
+                if (o["fish_motion_type"] == "carling") {
+                    name = "IF3D_CarlingFish";
+                } else if (o["fish_motion_type"] == "stefan") {
+                    name = "IF3D_StefanFish";
+                } else if (o["fish_motion_type"] == "towed") {
+                    params["amplitudeFactor"] = 0.0;
+                    name = "IF3D_CarlingFish";
+                }
+                if (o["fish_fix_xy_plane"])
+                    params["bFixToPlanar"] = 1;
+            }
+
+            /* Velocity */
+            var forced = o["obstacle_forced"] ? 1 : 0;
+            params["bForcedInSimFrame"] = forced;
+            if (forced) {
+                var v = o["obstacle_vel"];
+                if (is_ok(v[0])) params["xvel"] = v[0];
+                if (is_ok(v[1])) params["yvel"] = v[1];
+                if (is_ok(v[2])) params["zvel"] = v[2];
+                if (is_ok(v) && (type == SPHERE || type == CYLINDER)) {
+                    var v = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+                    var Re_curr = v * params["L"] / flow["nu"];
+                    var formula = "<span class=\"formula\">Re = u L / &nu;</span>";
+                    check_Re(Re_curr, formula, params)
+                }
+            }
+            if (!forced && type == FISH) {
+                var formula = "empirical formula <span class=\"formula\">Re = 1.5 L<sup>2</sup> / &nu; T</span>";
+                var Re_curr = 1.5 * params["L"] * params["L"] / flow["nu"] / params["T"];
+                check_Re(Re_curr, formula, params);
+            }
+
+            /* Frame of reference? */
+            params["bFixFrameOfRef"] = o["obstacle_frame_fixed"] ? 1 : 0;
+
+            /* Compute forces always by default */
+            params["computeForces"] = 1;
+
+            if (!error) {
+                // Concatenate to "-key1=value1 -key2=value2 ...".
+                var line = name;
+                for (var key in params)
+                    if (params.hasOwnProperty(key))
+                        line += " " + key + "=" + $.trim(params[key]);
+                factory += line + "\n";
+            } else {
+                factory += "# " + error + "\n";
+            }
+
+        }
+        job += "\n";
+        job += "FACTORY=\"\n" + factory + "\"\n";
+        job += "\n";
+
+        /* Running the executable */
+        job += "mpiexec -n " + simulation["num_nodes"] + " ./Swim3D ${OPTIONS} -factory-content \"${FACTORY}\"\n";
+
+        /* Merging into a single script */
+        var out = "";
+        out += pre;
+        out += "# Generate job script.\n";
+        out += "JOBSCRIPT=" + escape_shell(job) + "\n\n";
+        out += "echo \"${JOBSCRIPT}\" > ${RESULT_PATH}/job.sh\n";
+        out += "chmod +x ${RESULT_PATH}/job.sh\n\n";
+        out += "############################################################\n";
+        out += "# JOB PHASE\n";
+        out += "############################################################\n";
+        out += "cd ${RESULT_PATH}\n";
+        out += "./job.sh\n";
+
+        var json = JSON.stringify(value);
+        out += "\n\n# To edit this settings, press \"Load Config\" in the form and copy-paste the following line:\n# " + json;
+
+        $("#config-file").text(out);
+        hljs.highlightBlock($("#config-file")[0]);
+
+        /* Config info */
+        var max_blocks = Math.max(bpdx, bpdy, bpdz);
+        var config_info = {
+            "domain": "(0, " + (bpdx / max_blocks) + ") &#10005; "
+                    + "(0, " + (bpdy / max_blocks) + ") &#10005; "
+                    + "(0, " + (bpdz / max_blocks) + ")",
+            "Re": Re >= 0 ? parseInt(Re * 1000 + .5) / 1000 : "Unknown",
+            "Re_desc": Re_desc,
+        };
+        if (tdump > 0) {
+            var num_cells = bpdx * bpdy * bpdz * BLOCK_SIZE * BLOCK_SIZE * BLOCK_SIZE;
+            var size = num_cells * BYTES_PER_CELL;
+            var count = 1 + Math.floor(tend / tdump);
+            config_info["dump_info"] = {
+                "snapshot_size": (size / 1048576 / 1024) + "GB",
+                "snapshot_count": count,
+                "snapshot_total_size": (size * count / 1048576 / 1024) + "GB",
+            };
+        }
+        $("#config-info").html(CONFIG_INFO_TEMPLATE(config_info));
+
+        current_config = out;
+    };
+
+    /* Refresh form function. */
+    var maybe_refresh = function() {
+        if (form_control.isValid(true))
+            update_config(form_control.getValue());
+    };
+
+    /* "Download" config file. */
+    var download = function(filename, text) {
+        // First refresh just in case. This is probably a bit controversial...
+        maybe_refresh();
+
+        // https://stackoverflow.com/questions/3665115/create-a-file-in-memory-for-user-to-download-not-through-server/18197341#18197341
+        var element = document.createElement('a');
+        element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+        element.setAttribute('download', filename);
+        element.style.display = 'none';
+        document.body.appendChild(element);
+        element.click();
+        document.body.removeChild(element);
+    }
+
+    $("#download-config").click(function() {
+        download('cubism_config.sh', current_config);
+    });
+
+
+    /* Load config click event. */
+    $('#load-config-update').click(function() {
+        var json = $('#load-config-json').val().trim();
+        if (json && json[0] == '#')
+            json = json.substring(1);
+        try {
+            json = JSON.parse(json);
+        } catch (SyntaxError) {
+            alert("Invalid JSON.");
+        }
+        reset_form(json);
+        $('#load-config-modal').modal('hide');
+    });
+
+    /* Shortcut functions for form schema. */
+    var gen_coord_field = function(title) {
+        return {
+            "type": "number",
+            "title": title,
+            "default": "0.5",
+            "minimum": 0.0,
+            "maximum": 1.0,
+        };
+    };
+    var gen_vel_field = function(title) {
+        return {
+            "type": "number",
+            "title": title,
+            "default": "0.0",
+        };
+    };
+
+    /* Custom multi-value field. */
+    var MultiValueField = Alpaca.Fields.ArrayField.extend({
+        getTemplateDescriptorId : function () {
+            return "multivalue";
+        },
+
+        getFieldType: function() {
+            return "multivalue";
+        },
+
+        setup: function() {
+            if (!this.schema.minItems)
+                this.schema.minItems = this.data.length;
+            if (!this.schema.maxItems)
+                this.schema.maxItems = this.data.length;
+            this.options.toolbarSticky = true;
+
+            this.base();
+        },
+
+        /* Override default behavior which ignored `undefined` items.
+         * We want to keep them, to keep the order. */
+        getContainerValue: function() {
+            // If we're empty and we're also not required, then we hand back empty set.
+            if (this.children.length === 0 && !this.isRequired())
+                return [];
+
+            // Otherwise, construct an array and hand it back.
+            var o = [];
+            for (var i = 0; i < this.children.length; ++i)
+                o.push(this.children[i].getValue())
+            return o;
+        },
+    });
+    Alpaca.registerFieldClass("multivalue", MultiValueField);
+
+    /* Form structure. */
+    var SCHEMA = {
+        "title": CUBISM_NAME + " setup",
+        "type": "object",
+        "properties": {
+            "simulation": {
+                "type": "object",
+                "title": "Simulation setup",
+                "properties": {
+                    "num_nodes": {
+                        "type": "integer",
+                        "title": "Number of nodes",
+                        "default": 1,
+                    },
+                    "result_path": {
+                        "type": "any",
+                        "title": "Results path",
+                        "default": "results/simulation-01",
+                    },
+                    "num_cells": {
+                        "title": "Grid cells per dimension",
+                        "default": [128, 128, 128],
+                        "items": {
+                            "type": "integer",
+                            "minimum": BLOCK_SIZE,
+                        }
+                    },
+                    "tend": {
+                        "type": "number",
+                        "title": "Simulation time",
+                        "default": 1.0,
+                        "minimum": 0.0,
+                    },
+                    "tdump": {
+                        "type": "number",
+                        "title": "Snapshot interval",
+                        "default": 0.1,
+                        "minimum": 0.0,
+                    },
+                },
+            },
+            "flow": {
+                "type": "object",
+                "title": "Flow properties",
+                "properties": {
+                    "nu": {
+                        "type": "number",
+                        "title": "Kinematic viscosity",
+                        "default": "0.001",
+                    },
+                    "periodic_z": {
+                        "title": "Periodic in Z",
+                        "default": false,
+                    },
+                },
+            },
+            "advanced": {
+                "type": "object",
+                "title": "Advanced",
+                "properties": {
+                    "root_path": {
+                        "type": "any",
+                        "title": "Repository root path",
+                        "default": ROOT_PATH_DEFAULT,
+                    },
+                },
+            },
+            "obstacles": {
+                "type": "array",
+                "title": "Objects",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "obstacle_type": {
+                            "enum": [SPHERE, CYLINDER, NACA, FISH],
+                        },
+                        "center": {
+                            "title": "Center",
+                            "default": [0.5, 0.5, 0.5],
+                            "items": {
+                                "type": "number",
+                                "minimum": 0.0,
+                                "maximum": 1.0,
+                            },
+                        },
+                        "cylinder_center": {
+                            "title": "Center (XY)",
+                            "default": [0.5, 0.5],
+                            "items": {
+                                "type": "number",
+                                "minimum": 0.0,
+                                "maximum": 1.0,
+                            },
+                        },
+                        "cylinder_z_range": {
+                            "title": "Z<sub>low</sub> and Z<sub>high</sub>",
+                            "default": [0.0, 1.0],
+                            "items": {
+                                "type": "number",
+                                "minimum": 0.0,
+                                "maximum": 1.0,
+                            },
+                        },
+                        "radius": {
+                            "type": "number",
+                            "title": "Radius",
+                            "default": 0.1,
+                            "minimum": 0.0,
+                            "maximum": 1.0,
+                        },
+                        "length": {
+                            "type": "number",
+                            "title": "Length L",
+                            "default": 0.1,
+                            "minimum": 0.0,
+                        },
+                        "NACA_thickness": {
+                            "type": "number",
+                            "title": "Thickness (relative to length)",
+                            "default": 0.12,
+                            "minimum": 0.0,
+                            "maxmimum": 1.0,
+                        },
+                        "NACA_advanced": {
+                            "title": "Heaving/pitching options?",
+                            "default": false,
+                        },
+                        // Do not put default values for the following NACA
+                        // parameters, because they would hide placeholders
+                        // (defined in OPTIONS).
+                        "NACA_Aheave": { "type": "number", "title": "A<sub>H</sub>", },
+                        "NACA_Fheave": { "type": "number", "title": "f<sub>H</sub>", },
+                        "NACA_Mpitch": { "type": "number", "title": "&alpha;<sub>0</sub>", },
+                        "NACA_Apitch": { "type": "number", "title": "&alpha;<sub>1</sub>", },
+                        "NACA_Fpitch": { "type": "number", "title": "f<sub>F</sub>", },
+                        "NACA_Ppitch": { "type": "number", "title": "&phi;", },
+                        "fish_motion_type": {
+                            "title": "Motion",
+                            "enum": Object.keys(FISH_MOTION_TYPES),
+                            "default": Object.keys(FISH_MOTION_TYPES)[0],
+                        },
+                        "fish_T": {
+                            "type": "number",
+                            "title": "Undulation period T",
+                            "minimum": 0.0,
+                            "default": 1.0,
+                        },
+                        "fish_width_profile": {
+                            "title": "Width profile",
+                            "enum": Object.keys(FISH_WIDTH_PROFILES),
+                            "default": Object.keys(FISH_WIDTH_PROFILES)[0],
+                        },
+                        "fish_height_profile": {
+                            "title": "Height profile",
+                            "enum": Object.keys(FISH_HEIGHT_PROFILES),
+                            "default": Object.keys(FISH_HEIGHT_PROFILES)[0],
+                        },
+                        "obstacle_forced": {
+                            "default": true,
+                            "title": "Forced?",
+                        },
+                        "obstacle_vel": {
+                            "title": "Velocity",
+                            "default": [0.0, 0.0, 0.0],
+                            "items": {
+                                "type": "number",
+                            },
+                        },
+                        "fish_fix_xy_plane": {
+                            "default": false,
+                            "title": "Fix Z?",
+                        },
+                        "obstacle_frame_fixed": {
+                            "default": true,
+                            "title": "Frame follows the object?",
+                        },
+                    },
+                    "dependencies": {
+                        "center": ["obstacle_type"],
+                        "cylinder_center": ["obstacle_type"],
+                        "cylinder_z_range": ["obstacle_type"],
+                        "radius": ["obstacle_type"],
+                        "length": ["obstacle_type"],
+                        "NACA_thickness": ["obstacle_type"],
+                        "NACA_advanced": ["obstacle_type"],
+                        "NACA_Aheave": ["NACA_advanced"],
+                        "NACA_Fheave": ["NACA_advanced"],
+                        "NACA_Apitch": ["NACA_advanced"],
+                        "NACA_Fpitch": ["NACA_advanced"],
+                        "NACA_Mpitch": ["NACA_advanced"],
+                        "NACA_Ppitch": ["NACA_advanced"],
+                        "fish_motion_type": ["obstacle_type"],
+                        "fish_T": ["fish_motion_type"],
+                        "fish_width_profile": ["obstacle_type"],
+                        "fish_height_profile": ["obstacle_type"],
+                        "obstacle_vel": ["obstacle_forced"],
+                        "fish_fix_xy_plane": ["obstacle_type"],
+                    }
+                }
+            }
+        }
+    };
+
+    var validate_num_cells = function(callback) {
+        var message = null;
+        var values = this.getValue();
+        for (var i = 0; i < values.length; ++i) {
+            var v = values[i];
+            if (v % BLOCK_SIZE !== 0)
+                message = "Number of cells must be divisible by " + BLOCK_SIZE + " for each dimension.";
+        }
+        if (message) {
+            callback({"status": false, "message": message});
+        } else {
+            callback({"status": true});
+        }
+    };
+    var OPTIONS = {
+        "fields": {
+            "simulation": {
+                "fields": {
+                    "num_cells": {
+                        "type": "multivalue",
+                        "helpers": [
+                            "The axis with the largest number of cells will have a physical length of 1 unit. The other axes will scale accordingly.",
+                        ],
+                        "validator": validate_num_cells,
+                    },
+                    "result_path": {
+                        "TOOLTIP": "Path for storing the simulation results.",
+                    },
+                    "tdump": {
+                        "TOOLTIP": "Time interval for saving visualization snapshots. Set to 0 to disable.",
+                    },
+                },
+            },
+            "flow": {
+                "fields": {
+                    "periodic_z": {
+                        "type": "checkbox",
+                    },
+                },
+            },
+            "advanced": {
+                "fields": {
+                    "root_path": {
+                        "helper": CUBISM_NAME + " repository root folder.",
+                    },
+                },
+            },
+            "obstacles": {
+                "toolbarSticky": true,
+                "toolbar": {
+                    "showLabels": true,
+                    "actions": [{"label": "Add New Object", "action": "add"}],
+                },
+                "fields": {
+                    "item": {
+                        "fields": {
+                            "obstacle_type": {
+                                "default": SPHERE,
+                                "emptySelectFirst": false,
+                                "hideNone": true,
+                                "required": true,
+                                "sort": false,
+                            },
+                            "center": {
+                                "type": "multivalue",
+                                "required": true,
+                                "dependencies": { "obstacle_type": [SPHERE, NACA, FISH], },
+                            },
+                            "cylinder_center": {
+                                "type": "multivalue",
+                                "required": true,
+                                "dependencies": { "obstacle_type": [CYLINDER], },
+                            },
+                            "cylinder_z_range": {
+                                "type": "multivalue",
+                                "required": true,
+                                "dependencies": { "obstacle_type": [CYLINDER], },
+                                "helpers": [
+                                    "For cylinders extending the whole Z range, consider using <i>Periodic in Z</i> option.",
+                                    "The flat part of the half-cylinder is oriented in +X direction.",
+                                ],
+                            },
+                            "radius": {
+                                "required": true,
+                                "dependencies": { "obstacle_type": [SPHERE, CYLINDER], },
+                            },
+                            "length": {
+                                "required": true,
+                                "dependencies": { "obstacle_type": [NACA, FISH], },
+                            },
+                            "NACA_thickness": {
+                                "required": true,
+                                "dependencies": { "obstacle_type": [NACA], },
+                            },
+                            "NACA_advanced": {
+                                "type": "checkbox",
+                                "dependencies": { "obstacle_type": [NACA], },
+                            },
+                            "NACA_Aheave": {
+                                "dependencies": { "NACA_advanced": true },
+                                "placeholder": "Heaving amplitude (in airfoil length units)",
+                            },
+                            "NACA_Fheave": {
+                                "dependencies": { "NACA_advanced": true },
+                                "placeholder": "Heaving frequency",
+                            },
+                            "NACA_Apitch": {
+                                "dependencies": { "NACA_advanced": true },
+                                "placeholder": "Pitching amplitude",
+                            },
+                            "NACA_Fpitch": {
+                                "dependencies": { "NACA_advanced": true },
+                                "TOOLTIP": "Does not have to be equal to <i>Heaving frequency</i>.",
+                                "placeholder": "Pitching frequency",
+                            },
+                            "NACA_Mpitch": {
+                                "dependencies": { "NACA_advanced": true },
+                                "placeholder": "Mean angle of attack (mean pitch angle)",
+                            },
+                            "NACA_Ppitch": {
+                                "dependencies": { "NACA_advanced": true },
+                                "placeholder": "Heaving-pitching phase",
+                                "helpers": [
+                                    "Vertical position: y(t) = y<sub>center</sub> + A<sub>H</sub> L cos(2 &pi; f<sub>H</sub> t)<br>",
+                                    "Angle of attack: &alpha;(t) = &alpha;<sub>0</sub> + &alpha;<sub>1</sub> cos(2 &pi; (f<sub>F</sub> t + &phi;))",
+                                ],
+                            },
+                            "fish_motion_type": {
+                                "dependencies": { "obstacle_type": [FISH], },
+                                "optionLabels": get_values(FISH_MOTION_TYPES),
+                                "removeDefaultNone": true,
+                                "sort": false,
+                                "vertical": false,
+                            },
+                            "fish_T": {
+                                "dependencies": { "fish_motion_type": ["carling", "stefan"], },
+                            },
+                            "fish_width_profile": {
+                                "type": "radio",
+                                "dependencies": { "obstacle_type": [FISH], },
+                                "optionLabels": get_values(FISH_WIDTH_PROFILES),
+                                "removeDefaultNone": true,
+                                "sort": false,
+                                "vertical": false,
+                            },
+                            "fish_height_profile": {
+                                "type": "radio",
+                                "dependencies": { "obstacle_type": [FISH], },
+                                "optionLabels": get_values(FISH_HEIGHT_PROFILES),
+                                "removeDefaultNone": true,
+                                "sort": false,
+                                "vertical": false,
+                            },
+                            "obstacle_forced": {
+                                "type": "checkbox",
+                                "TOOLTIP": "Enable to specify the obstacle velocity. Otherwise, the velocity will be calculated dynamically from the flow-induced forces.",
+                                "INLINE_CHECKBOX": true,
+                            },
+                            "obstacle_vel": {
+                                "type": "multivalue",
+                                "dependencies": { "obstacle_forced": true },
+                            },
+                            "fish_fix_xy_plane": {
+                                "type": "checkbox",
+                                "dependencies": { "obstacle_type": [FISH], },
+                                "TOOLTIP": "Disable movement in Z direction. Allow rotation only in XY plane.",
+                                "INLINE_CHECKBOX": true,
+                            },
+                            "obstacle_frame_fixed": {
+                                "type": "checkbox",
+                                "TOOLTIP": "In case multiple objects are selected, the frame of reference follows their average velocity.",
+                                "INLINE_CHECKBOX": true,
+                            },
+                        }
+                    }
+                }
+            }
+        },
+    };
+
+    /* Add a Bootstrap tooltip to the control or multivalue label. */
+    var __add_tooltip = function(label, _this) {
+        label.tooltip({"html": true, "title": _this.options["TOOLTIP"]});
+        label.append(' <i class="glyphicon glyphicon-info-sign"></i>');
+    };
+    var VIEW = {
+        "parent": "bootstrap-edit-horizontal",
+        "fields": {
+            "/obstacles/obstacle_forced": { "templates": { "control": "#control-inline-helper-template" }, },
+            "/obstacles/fish_fix_xy_plane": { "templates": { "control": "#control-inline-helper-template" }, },
+            "/obstacles/obstacle_frame_fixed": { "templates": { "control": "#control-inline-helper-template" }, },
+        },
+        "horizontal": true,
+        "layout": {
+            "template": "#two-column-layout-template",
+            "bindings": {
+                "simulation": "leftcolumn",
+                "advanced": "leftcolumn",
+                "flow": "rightcolumn",
+                "obstacles": "rightcolumn",
+            }
+        },
+        // This part was super annoying. Couldn't figure out how to select a
+        // custom view (created with registerView) for a specific field.
+        // So, to customize "bootstrap-edit-horizontal" for some fields,
+        // we have a custom view for everything and then redirect to the
+        // built-in one whenever there's nothing to update. (kicici)
+        "callbacks": {
+            "control": function() {
+                var fieldEl = $(this.getFieldEl());
+
+                // Our customization?
+                if (this.options["INLINE_CHECKBOX"]) {
+                    // Don't forget to set up the template in VIEW["fields"]!
+                    fieldEl.find("input[type=checkbox]").parent().parent().addClass("checkbox");
+                } else if (this.parent.getFieldType() == "multivalue") {
+                    // Don't forget to set up the template in VIEW["fields"]!
+                    fieldEl.find("input").addClass('form-control');
+                    if (this.view.horizontal)
+                        fieldEl.find(".help-block").addClass("col-sm-offset-3 col-sm-9");
+                } else {
+                    // https://github.com/gitana/alpaca/issues/255
+                    // Using directly "bootstrap-edit-horizontal" doesn't work,
+                    // use its parent view.
+                    Alpaca.views["bootstrap-edit"].callbacks.control.call(this);
+                }
+
+                // Add tooltip.
+                if (this.options["TOOLTIP"])
+                    __add_tooltip(fieldEl.children(".control-label"), this);
+            },
+            "container": function() {
+                var containerEl = $(this.getContainerEl());
+
+                if (this.getFieldType() === "multivalue") {
+                    containerEl.parent().addClass("row");
+                    containerEl.parent().find(".alpaca-control-label").addClass("col-sm-3");
+                    containerEl.parent().find(".help-block").addClass("col-sm-offset-3 col-sm-9");
+                    containerEl.parent().append("<div style='clear:both;'></div>");
+                    containerEl.removeClass("form-horizontal");
+                    containerEl.addClass("col-sm-9");
+                } else {
+                    Alpaca.views["bootstrap-edit"].callbacks.container.call(this);
+                }
+
+                // Add tooltip.
+                if (this.options["TOOLTIP"])
+                    __add_tooltip(containerEl.parent().children("label"), this);
+            },
+        },
+        "templates": {
+            "container-multivalue-item": "#container-multivalue-item-template",
+            "multivalue": "#container-multivalue-template",
+        },
+    };
+
+    var reset_form = function(data) {
+        $("#form").alpaca("destroy");
+        $("#form").alpaca({
+            "data": data,
+            "schema": SCHEMA,
+            "options": OPTIONS,
+            "view": VIEW,
+            "postRender": function(control) {
+                window.form_control = form_control = control;
+                control.on("change", maybe_refresh);
+                var delayed_refresh = function() {
+                    // https://github.com/gitana/alpaca/issues/583
+                    // Form doesn't update when array items are added or removed.
+                    // Therefore, we listen to all clicks to array actionbar.
+
+                    // However, remove and move events are not at all triggered. :(
+
+                    // ...and the form update is not instantaneous.
+                    setTimeout(maybe_refresh, 500);
+                    setTimeout(maybe_refresh, 1500);
+                    setTimeout(maybe_refresh, 2500);
+                }
+                $("#form").on("click", ".alpaca-array-toolbar-action", delayed_refresh);
+                $("#form").on("click", ".alpaca-array-actionbar-action", delayed_refresh);
+                update_config(control.getValue());
+            },
+        });
+    };
+    reset_form({});
+})();
+</script>
+
+</body>
+</html>

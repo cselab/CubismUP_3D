@@ -1,0 +1,11 @@
+CXX=mpic++
+LD=mpic++
+#CPPFLAGS += -dynamic -DDUMPGRID
+#CPPFLAGS += -I$(CRAY_MPICH2_DIR)/include/
+#ISPCFLAGS += --arch=x86-64
+#LIBS += -L$(CRAY_MPICH2_DIR)/lib/ -lmpich -lmpichcxx
+
+ifeq "$(hypre)" "true"
+CPPFLAGS+= -I/home/novatig/hypre/build/include/
+LIBS+= -L/home/novatig/hypre/build/lib/ -lHYPRE
+endif

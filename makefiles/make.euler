@@ -1,0 +1,5 @@
+CXX=mpic++
+LD=mpic++
+accfft=false
+FFTW_ROOT=/cluster/home/novatig/fftw-3.3.5/gnu630_ompi30/
+HDF5_ROOT=/cluster/home/novatig/hdf5-1.10.1/gnu630_ompi30/

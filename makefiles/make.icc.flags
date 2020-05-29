@@ -1,0 +1,11 @@
+CPPFLAGS+= -std=c++14 -qopenmp
+LIBS+= -qopenmp
+
+CPPFLAGS+= -Wall -Warray-bounds -Wchar-subscripts -Wcomment -Wenum-compare
+CPPFLAGS+= -Wformat -Wuninitialized -Wmaybe-uninitialized -Wmain -Wnarrowing
+CPPFLAGS+= -Wnonnull -Wparentheses -Wpointer-sign -Wreorder -Wreturn-type
+CPPFLAGS+= -Wsign-compare -Wsequence-point -Wtrigraphs -Wunused-function
+CPPFLAGS+= -Wunused-but-set-variable -Wunused-variable -Wwrite-strings
+
+CPPFLAGS+= -ffnalias -fbuiltin -fast -falias -DNDEBUG
+
