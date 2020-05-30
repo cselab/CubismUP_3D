@@ -96,8 +96,7 @@ inline void app_main(
   const int maxGridN = sim.sim.local_bpdx * CUP_BLOCK_SIZE;
   cubismup3d::HITtargetData target(maxGridN, parser("-initCondFileTokens").asString());
   const Real LES_RL_FREQ_A = parser("-RL_freqActions").asDouble( 4.0);
-  const Real fac = std::sqrt(16.0 / LES_RL_FREQ_A);
-  const Real LES_RL_N_TSIM = parser("-RL_nIntTperSim").asDouble(20.0) * fac;
+  const Real LES_RL_N_TSIM = parser("-RL_nIntTperSim").asDouble(20.0);
   const bool bGridAgents = parser("-RL_gridPointAgents").asInt(0);
   const bool bEvaluating = not comm->isTraining();
 
@@ -131,7 +130,7 @@ inline void app_main(
   #endif
   comm->setStateObservable(b_observable);
 
-  const std::vector<double> lower_act_bound{0.02}, upper_act_bound{0.06};
+  const std::vector<double> lower_act_bound{0.02}, upper_act_bound{0.04};
   comm->setActionScales(upper_act_bound, lower_act_bound, false);
   comm->disableDataTrackingForAgents(nAgents, nAgents + nThreadSafetyAgents);
   comm->agentsShareExplorationNoise();

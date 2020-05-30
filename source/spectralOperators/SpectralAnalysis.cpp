@@ -111,9 +111,10 @@ void SpectralAnalysis::run()
 void SpectralAnalysis::dump2File() const
 {
   if(target not_eq nullptr and target->holdsTargetData
-     and sM->sim.time > 5 * target->tInteg)
+     and sM->sim.time > 5 * target->tInteg) {
     target->updateAvgLogLikelihood(sM->stats,pSamplesCount,avgP,m2P,sM->sim.cs);
-
+    if(sM->sim.time > 100 * target->tInteg) abort(); // end stats collection
+  }
   const Real denom =  sM->sim.dt * sM->sim.actualInjectionRate;
   const Real errTKE = (sM->stats.tke - sM->stats.expectedNextTke) / denom;
   if(sM->sim.verbose)
