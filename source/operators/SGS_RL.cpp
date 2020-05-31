@@ -56,12 +56,14 @@ struct ActionInterpolator
     for(int z = 0; z < 2; ++z) // 0 is current block, 1 is nearest along z, y, x
       for(int y = 0; y < 2; ++y)
         for(int x = 0; x < 2; ++x) {
-          const Real distx = x? dist_nbix : dist_bix;
-          const Real disty = y? dist_nbiy : dist_biy;
-          const Real distz = z? dist_nbiz : dist_biz;
+          const Real distx = (x? dist_nbix : dist_bix) / NB;
+          const Real disty = (y? dist_nbiy : dist_biy) / NB;
+          const Real distz = (z? dist_nbiz : dist_biz) / NB;
+          assert(distx <= 1.0 and disty <= 1.0 and disty <= 1.0);
           const Real act = action(x? nbix : bix, y? nbiy : biy, z? nbiz : biz);
-          const Real dist = std::sqrt(distx*distx + disty*disty + distz*distz);
-          const Real weight = std::max( (NB - dist)/NB, (Real) 0);
+          //const Real dist =std::sqrt(distx*distx + disty*disty + distz*distz);
+          //const Real weight = std::max(1 - dist, (Real) 0);
+          const Real weight = (1 - distx) * (1 - disty) * (1 - distz);
           weighted_sum_act += act * weight;
           sum_acts_weights += weight;
         }

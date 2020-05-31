@@ -130,7 +130,7 @@ inline void app_main(
   #endif
   comm->setStateObservable(b_observable);
 
-  const std::vector<double> lower_act_bound{0.02}, upper_act_bound{0.04};
+  const std::vector<double> lower_act_bound{0.02}, upper_act_bound{0.06};
   comm->setActionScales(upper_act_bound, lower_act_bound, false);
   comm->disableDataTrackingForAgents(nAgents, nAgents + nThreadSafetyAgents);
   comm->agentsShareExplorationNoise();
