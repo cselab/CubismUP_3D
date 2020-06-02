@@ -321,7 +321,9 @@ void _analysis_filter_kernel( acc_c*const __restrict__ Uhat,
       // to hold also tke, eps and tau
       atomicAdd(reductionBuf + 4 + binID, E);
     }
-    if (k2 > 0 && kind < nyquist*nyquist) {
+    if (k2 > 0 && kind < 3.5) {
+      // filter starts at k = 2 * 2 pi / L
+      // 0.5 added to ensure inclusion of 1^2 + 1^2 + 1^2
       tkeFiltered += E;
     } else {
       Uhat[ind][0] = 0; Uhat[ind][1] = 0;
