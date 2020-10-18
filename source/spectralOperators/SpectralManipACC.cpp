@@ -128,16 +128,12 @@ streams(new myCUDAstreams())
       printf("PoissonSolverPeriodic: something wrong in isize\n");
       abort();
     }
-
     cudaMalloc((void**) & gpu_u, alloc_max);
     cudaMalloc((void**) & gpu_v, alloc_max);
     cudaMalloc((void**) & gpu_w, alloc_max);
     acc_plan* P = accfft_plan_dft(totN, gpu_u, gpu_u, acc_comm, ACCFFT_MEASURE);
     plan = (void*) P;
     data_size = (size_t) myN[0] * (size_t) myN[1] * (size_t) 2*nz_hat;
-    data_u = (Real*) malloc(data_size*sizeof(Real));
-    data_v = (Real*) malloc(data_size*sizeof(Real));
-    data_w = (Real*) malloc(data_size*sizeof(Real));
     stridez = 1; // fast
     stridey = 2*nz_hat;
     stridex = myN[1] * 2*nz_hat; // slow
@@ -157,13 +153,16 @@ streams(new myCUDAstreams())
     ostart[1] = 0; istart[1] = 0;
     ostart[2] = 0; istart[2] = 0;
     data_size = (size_t) myN[2] * (size_t) myN[1] * (size_t) 2*nx_hat;
-    data_u = (Real*) malloc(data_size*sizeof(Real));
-    data_v = (Real*) malloc(data_size*sizeof(Real));
-    data_w = (Real*) malloc(data_size*sizeof(Real));
     stridez = myN[1] * 2*nx_hat; // fast
     stridey = 2*nx_hat;
     stridex = 1; // slow
   }
+  data_u = (Real*) malloc(data_size * sizeof(Real));
+  data_v = (Real*) malloc(data_size * sizeof(Real));
+  data_w = (Real*) malloc(data_size * sizeof(Real));
+  #ifdef ENERGY_FLUX_SPECTRUM
+  data_j = (Real*) malloc(data_size * sizeof(Real));
+  #endif
 }
 
 void SpectralManipACC::prepareFwd()

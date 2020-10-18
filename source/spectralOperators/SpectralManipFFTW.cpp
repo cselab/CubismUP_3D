@@ -19,23 +19,17 @@
 CubismUP_3D_NAMESPACE_BEGIN
 using namespace cubism;
 
-//static inline Real pow2_cplx(const fft_c cplx_val) {
-//  return pow2(cplx_val[0]) + pow2(cplx_val[1]);
-//}
-
 void SpectralManipFFTW::_compute_forcing()
 {
   fft_c *const cplxData_u  = (fft_c *) data_u;
   fft_c *const cplxData_v  = (fft_c *) data_v;
   fft_c *const cplxData_w  = (fft_c *) data_w;
-  //fft_c *const cplxData_cs2  = (fft_c *) data_cs2;
   const long nKx = static_cast<long>(gsize[0]);
   const long nKy = static_cast<long>(gsize[1]);
   const long nKz = static_cast<long>(gsize[2]);
   const Real waveFactorX = 2.0 * M_PI / sim.extent[0];
   const Real waveFactorY = 2.0 * M_PI / sim.extent[1];
   const Real waveFactorZ = 2.0 * M_PI / sim.extent[2];
-  //const Real wFacX = 2*M_PI / nKx, wFacY = 2*M_PI / nKy, wFacZ = 2*M_PI / nKz;
   const Real h = sim.uniformH();
 
   const long loc_n1 = local_n1, shifty = local_1_start;
@@ -47,10 +41,18 @@ void SpectralManipFFTW::_compute_forcing()
 
   Real tke = 0, eps = 0, lIntegral = 0, tkeFiltered = 0;
   Real * E_msr = stats.E_msr;
-  memset(E_msr, 0, nBins * sizeof(Real));
+  memset(E_msr, 0, nBins * sizeof(Real)); //Only measure spectrum up to Nyquist
+  #ifdef ENERGY_FLUX_SPECTRUM
+    Real * Eflux = stats.Eflux;
+    memset(Eflux, 0, nBins * sizeof(Real));
+    fft_c *const cplxData_j  = (fft_c *) data_j;
+  #endif
 
-  // Let's only measure spectrum up to Nyquist.
-  #pragma omp parallel for reduction(+ : E_msr[:nBins], tke, eps, lIntegral, tkeFiltered) schedule(static)
+  #ifdef ENERGY_FLUX_SPECTRUM
+    #pragma omp parallel for reduction(+ : E_msr[:nBins], Eflux[:nBins], tke, eps, lIntegral, tkeFiltered) schedule(static)
+  #else
+    #pragma omp parallel for reduction(+ : E_msr[:nBins], tke, eps, lIntegral, tkeFiltered) schedule(static)
+  #endif
   for(long j = 0; j<loc_n1; ++j)
   for(long i = 0; i<sizeX;  ++i)
   for(long k = 0; k<sizeZ_hat; ++k)
@@ -93,10 +95,22 @@ void SpectralManipFFTW::_compute_forcing()
       const size_t binID = std::floor(std::sqrt((Real) kind) * nyquist_scaling);
       assert(binID < nBins);
       E_msr[binID] += E;
-      //if (bComputeCs2Spectrum){
-      //  const Real cs2 = std::sqrt(pow2_cplx(cplxData_cs2[linidx]));
-      //  cs2_msr[binID] += mult*cs2;
-      //}
+      #ifdef ENERGY_FLUX_SPECTRUM
+        const Real JR = cplxData_j[linidx][0], JI = cplxData_j[linidx][1];
+        #if ENERGY_FLUX_SPECTRUM == 1
+          Eflux[binID] += mult*std::sqrt(std::max(JR*JR + JI+JI, (Real)0));
+        #else
+          const Real S11sqR = pow2(- UI * dXfac),  S11sqI = pow2(UR * dXfac);
+          const Real S22sqR = pow2(- VI * dYfac),  S22sqI = pow2(VR * dYfac);
+          const Real S33sqR = pow2(- WI * dZfac),  S33sqI = pow2(WR * dZfac);
+          const Real S12sqR = pow2(dUdYR+dVdXR), S12sqI = pow2(dUdYI+dVdXI);
+          const Real S23sqR = pow2(dVdZR+dWdYR), S23sqI = pow2(dVdZI+dWdYI);
+          const Real S31sqR = pow2(dWdXR+dUdZR), S31sqI = pow2(dWdXI+dUdZI);
+          const Real SR2 = 2*S11sqR +2*S22sqR +2*S33sqR +S12sqR +S23sqR +S31sqR;
+          const Real SI2 = 2*S11sqI +2*S22sqI +2*S33sqI +S12sqI +S23sqI +S31sqI;
+          Eflux[binID] += mult*h*h*(JR*std::pow(SR2,1.5) +JI*std::pow(SI2,1.5));
+        #endif
+      #endif
     }
 
     if (k2 > 0 && k2 < 3.5) {
@@ -114,15 +128,17 @@ void SpectralManipFFTW::_compute_forcing()
   MPI_Allreduce(MPI_IN_PLACE, &eps, 1, MPIREAL, MPI_SUM, m_comm);
   MPI_Allreduce(MPI_IN_PLACE, &lIntegral, 1, MPIREAL, MPI_SUM, m_comm);
   MPI_Allreduce(MPI_IN_PLACE, &tkeFiltered, 1, MPIREAL, MPI_SUM, m_comm);
-  //if (bComputeCs2Spectrum){
-  //  assert(false);
-    //#pragma omp parallel reduction(+ : cs2_msr[:nBin])
-    //MPI_Allreduce(MPI_IN_PLACE, cs2_msr, nBin, MPIREAL, MPI_SUM, sM->m_comm);
-  //}
+  #ifdef ENERGY_FLUX_SPECTRUM
+  MPI_Allreduce(MPI_IN_PLACE, Eflux, nBins, MPIREAL, MPI_SUM, m_comm);
+  #endif
 
   const Real normalization = 1.0 / pow2(normalizeFFT);
-  for (size_t binID = 0; binID < nBins; binID++) E_msr[binID] *= normalization;
-  //if (bComputeCs2Spectrum) cs2_msr[binID] /= normalizeFFT;
+  for (size_t binID = 0; binID < nBins; binID++) {
+    E_msr[binID] *= normalization;
+    #ifdef ENERGY_FLUX_SPECTRUM
+    Eflux[binID] *= normalization;
+    #endif
+  }
 
   stats.tke = tke * normalization;
   stats.l_integral = lIntegral / tke;
@@ -319,7 +335,10 @@ SpectralManipFFTW::SpectralManipFFTW(SimulationData&s): SpectralManip(s)
   data_u = _FFTW_(alloc_real)(2*alloc_local);
   data_v = _FFTW_(alloc_real)(2*alloc_local);
   data_w = _FFTW_(alloc_real)(2*alloc_local);
-  // data_cs2 = _FFTW_(alloc_real)(2*alloc_local);
+
+  #ifdef ENERGY_FLUX_SPECTRUM
+    data_j = _FFTW_(alloc_real)(2*alloc_local);
+  #endif
 }
 
 void SpectralManipFFTW::prepareFwd()
@@ -327,14 +346,17 @@ void SpectralManipFFTW::prepareFwd()
   if (bAllocFwd) return;
 
   fwd_u = (void*) _FFTW_(mpi_plan_dft_r2c_3d)(gsize[0], gsize[1], gsize[2],
-    data_u, (fft_c*)data_u, m_comm, FFTW_MPI_TRANSPOSED_OUT  | FFTW_MEASURE);
+    data_u, (fft_c*)data_u, m_comm, FFTW_MPI_TRANSPOSED_OUT | FFTW_MEASURE);
   fwd_v = (void*) _FFTW_(mpi_plan_dft_r2c_3d)(gsize[0], gsize[1], gsize[2],
-    data_v, (fft_c*)data_v, m_comm, FFTW_MPI_TRANSPOSED_OUT  | FFTW_MEASURE);
+    data_v, (fft_c*)data_v, m_comm, FFTW_MPI_TRANSPOSED_OUT | FFTW_MEASURE);
   fwd_w = (void*) _FFTW_(mpi_plan_dft_r2c_3d)(gsize[0], gsize[1], gsize[2],
-    data_w, (fft_c*)data_w, m_comm, FFTW_MPI_TRANSPOSED_OUT  | FFTW_MEASURE);
+    data_w, (fft_c*)data_w, m_comm, FFTW_MPI_TRANSPOSED_OUT | FFTW_MEASURE);
 
-  //fwd_cs2 = (void*) _FFTW_(mpi_plan_dft_r2c_3d)(gsize[0], gsize[1], gsize[2],
-  //data_cs2, (fft_c*)data_cs2, m_comm, FFTW_MPI_TRANSPOSED_OUT | FFTW_MEASURE);
+  #ifdef ENERGY_FLUX_SPECTRUM
+  fwd_j = (void*) _FFTW_(mpi_plan_dft_r2c_3d)(gsize[0], gsize[1], gsize[2],
+    data_j, (fft_c*)data_j, m_comm, FFTW_MPI_TRANSPOSED_OUT | FFTW_MEASURE);
+  #endif
+
   bAllocFwd = true;
 }
 
@@ -363,7 +385,9 @@ void SpectralManipFFTW::runFwd() const
   _FFTW_(execute)((fft_plan) fwd_v);
   _FFTW_(execute)((fft_plan) fwd_w);
 
-  // _FFTW_(execute)((fft_plan) fwd_cs2);
+  #ifdef ENERGY_FLUX_SPECTRUM
+    _FFTW_(execute)((fft_plan) fwd_j);
+  #endif
 }
 
 void SpectralManipFFTW::runBwd() const
@@ -383,18 +407,23 @@ SpectralManipFFTW::~SpectralManipFFTW()
   _FFTW_(free)(data_u);
   _FFTW_(free)(data_v);
   _FFTW_(free)(data_w);
-  // _FFTW_(free)(data_cs2);
+  #ifdef ENERGY_FLUX_SPECTRUM
+    _FFTW_(free)(data_j);
+  #endif
   if (bAllocFwd) {
     _FFTW_(destroy_plan)((fft_plan) fwd_u);
     _FFTW_(destroy_plan)((fft_plan) fwd_v);
     _FFTW_(destroy_plan)((fft_plan) fwd_w);
-    // _FFTW_(destroy_plan)((fft_plan) fwd_cs2);
+    #ifdef ENERGY_FLUX_SPECTRUM
+      _FFTW_(destroy_plan)((fft_plan) fwd_j);
+    #endif
   }
   if (bAllocBwd) {
     _FFTW_(destroy_plan)((fft_plan) bwd_u);
     _FFTW_(destroy_plan)((fft_plan) bwd_v);
     _FFTW_(destroy_plan)((fft_plan) bwd_w);
   }
+
   _FFTW_(mpi_cleanup)();
 }
 

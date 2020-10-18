@@ -143,8 +143,9 @@ void HITfiltering::operator()(const double dt)
 {
   if ( not (sim.timeAnalysis>0 && (sim.time+dt) >= sim.nextAnalysisTime) )
     return;
+  if (sim.muteAll) return;
 
-  sim.startProfiler("SGS Kernel");
+  sim.startProfiler("HITfiltering Kernel");
   const int BPDX = sim.grid->getBlocksPerDimension(0);
   const int BPDY = sim.grid->getBlocksPerDimension(1);
   const int BPDZ = sim.grid->getBlocksPerDimension(2);
@@ -238,6 +239,166 @@ void HITfiltering::operator()(const double dt)
     for (int i = 0; i < nBins; ++i) buf.push_back( H[i] / (double) normalize);
     FILE * pFile = fopen ("dnsAnalysis.raw", "ab");
     fwrite (buf.data(), sizeof(double), buf.size(), pFile);
+    fflush(pFile); fclose(pFile);
+  }
+
+  sim.stopProfiler();
+
+  check("SGS");
+}
+
+StructureFunctions::StructureFunctions(SimulationData& s) : Operator(s)
+{
+  std::random_device rd;
+  gen.seed(rd());
+}
+
+inline Real periodic_distance(const Real x1, const Real x0, const Real extent)
+{
+  const Real dx = x1 - x0;
+  if      (dx >   extent/2) return dx - extent;
+  else if (dx <= -extent/2) return dx + extent;
+  else return dx;
+}
+inline Real periodic_distance(const std::array<Real,3> & p1,
+                     const std::array<Real,3> & p0,
+                     const std::array<Real,3> & extent)
+{
+  const Real dx = periodic_distance(p1[0], p0[0], extent[0]);
+  const Real dy = periodic_distance(p1[1], p0[1], extent[1]);
+  const Real dz = periodic_distance(p1[2], p0[2], extent[2]);
+  return std::sqrt(dx*dx + dy*dy + dz*dz);
+}
+
+std::array<double, 6> StructureFunctions::pick_ref_point()
+{
+  std::uniform_int_distribution<int> distrib_ranks(0, sim.nprocs-1);
+  std::uniform_int_distribution<size_t> distrib_block(0, vInfo.size()-1);
+  std::uniform_int_distribution<int> distrib_elem(0, CUP_BLOCK_SIZE-1);
+  int ref_rank = distrib_ranks(gen);
+  MPI_Bcast(&ref_rank, 1, MPI_INT, 0, sim.app_comm);
+  const size_t ref_bid  = distrib_block(gen);
+  const int ref_iz = distrib_elem(gen);
+  const int ref_iy = distrib_elem(gen);
+  const int ref_ix = distrib_elem(gen);
+  const BlockInfo & ref_info = vInfo[ref_bid];
+  FluidBlock & ref_block = * (FluidBlock*) ref_info.ptrBlock;
+  const FluidElement & ref_elem = ref_block(ref_ix, ref_iy, ref_iz);
+  const std::array<Real,3> ref_pos = ref_info.pos<Real>(ref_ix, ref_iy, ref_iz);
+  const std::array<Real,3> ref_vel = {ref_elem.u, ref_elem.v, ref_elem.w};
+  std::array<double, 6> ref = {0};
+  if(sim.rank == ref_rank) {
+    ref[0] = ref_pos[0];
+    ref[1] = ref_pos[1];
+    ref[2] = ref_pos[2];
+    ref[3] = ref_vel[0];
+    ref[4] = ref_vel[1];
+    ref[5] = ref_vel[2];
+  }
+  MPI_Allreduce(MPI_IN_PLACE, ref.data(), 6, MPI_DOUBLE, MPI_SUM, sim.app_comm);
+  if(sim.rank == ref_rank) {
+    assert(std::fabs(ref[0] - ref_pos[0]) < 1e-8);
+    assert(std::fabs(ref[1] - ref_pos[1]) < 1e-8);
+    assert(std::fabs(ref[2] - ref_pos[2]) < 1e-8);
+    assert(std::fabs(ref[3] - ref_vel[0]) < 1e-8);
+    assert(std::fabs(ref[4] - ref_vel[1]) < 1e-8);
+    assert(std::fabs(ref[5] - ref_vel[2]) < 1e-8);
+  }
+  return ref;
+}
+
+
+void StructureFunctions::operator()(const double dt)
+{
+  if (sim.muteAll) return;
+  if (computeInterval <= 0 or (sim.time+dt) < nextComputeTime)
+    return;
+  nextComputeTime += computeInterval;
+
+  sim.startProfiler("StructureFunctions Kernel");
+
+  auto ref = pick_ref_point();
+  const std::array<Real,3> ref_pos = {ref[0], ref[1], ref[2]};
+  const std::array<Real,3> ref_vel = {ref[3], ref[4], ref[5]};
+
+  static constexpr size_t oneD_ref_gridN = 32; // LES resolution
+  const Real delta_increments = sim.maxextent / oneD_ref_gridN;
+  static constexpr size_t n_shells = oneD_ref_gridN / 2;
+
+  unsigned long counts[n_shells] = {0};
+  double sum_S2[n_shells] = {0.0}, sum_S3[n_shells] = {0.0};
+  double sum_S4[n_shells] = {0.0}, sum_S6[n_shells] = {0.0};
+  double sum_A3[n_shells] = {0.0};
+
+  const auto get_shell_id = [=](const Real delta) {
+    // first shell goes from 0 to 1.5 delta_increments
+    // then from 1.5 to 2.5 and so on, so we can compute with 0:N / eta
+    // NOTE: 'average' radius is = 3/4 * (B^4 - A^4) / (B^3 - A^3)
+    // where B and A are external and internal radius of shell respectively
+    if (delta <= delta_increments * 1.5) return (size_t) 0;
+    const Real delta_nondim = delta / delta_increments; //should be at least 1.5
+    assert(delta_nondim >= 1.5);
+    // in [1.5, 2.5) return 1, in [2.5, 3.5) return 2 and so on:
+    const size_t shell_id = std::max(delta_nondim - 0.5, (Real) 1);
+    return shell_id;
+  };
+  #pragma omp parallel for schedule(static) reduction(+ : counts[:n_shells], \
+                                                          sum_S2[:n_shells], \
+                                                          sum_S3[:n_shells], \
+                                                          sum_S4[:n_shells], \
+                                                          sum_S6[:n_shells], \
+                                                          sum_A3[:n_shells])
+  for (size_t i = 0; i < vInfo.size(); ++i)
+  {
+    const BlockInfo & info = vInfo[i];
+    FluidBlock& block = * (FluidBlock*) info.ptrBlock;
+
+    for (int iz = 0; iz < CUP_BLOCK_SIZE; ++iz)
+    for (int iy = 0; iy < CUP_BLOCK_SIZE; ++iy)
+    for (int ix = 0; ix < CUP_BLOCK_SIZE; ++ix)
+    {
+      const std::array<Real,3> pos = info.pos<Real>(ix, iy, iz);
+      const Real delta = periodic_distance(pos, ref_pos, sim.extent);
+      const size_t shell_id = get_shell_id(delta);
+
+      if (shell_id >= n_shells) continue;
+      const Real rx = pos[0] - ref_pos[0];
+      const Real ry = pos[1] - ref_pos[1];
+      const Real rz = pos[2] - ref_pos[2];
+      const Real rnorm = std::max(std::sqrt(rx*rx + ry*ry + rz*rz),
+                                  std::numeric_limits<Real>::epsilon());
+      const Real ex = rx/rnorm, ey = ry/rnorm, ez = rz/rnorm;
+      const Real du = block(ix,iy,iz).u - ref_vel[0];
+      const Real dv = block(ix,iy,iz).v - ref_vel[1];
+      const Real dw = block(ix,iy,iz).w - ref_vel[2];
+      const Real deltaU = du*ex + dv*ey + dw*ez;
+      counts[shell_id] += 1;
+      sum_S2[shell_id] += std::pow(deltaU, 2);
+      sum_S3[shell_id] += std::pow(deltaU, 3);
+      sum_S4[shell_id] += std::pow(deltaU, 4);
+      sum_S6[shell_id] += std::pow(deltaU, 6);
+      sum_A3[shell_id] += std::pow(std::fabs(deltaU), 3);
+    }
+  }
+
+  MPI_Allreduce(MPI_IN_PLACE, sum_S2, n_shells, MPI_DOUBLE, MPI_SUM, sim.app_comm);
+  MPI_Allreduce(MPI_IN_PLACE, sum_S3, n_shells, MPI_DOUBLE, MPI_SUM, sim.app_comm);
+  MPI_Allreduce(MPI_IN_PLACE, sum_S4, n_shells, MPI_DOUBLE, MPI_SUM, sim.app_comm);
+  MPI_Allreduce(MPI_IN_PLACE, sum_S6, n_shells, MPI_DOUBLE, MPI_SUM, sim.app_comm);
+  MPI_Allreduce(MPI_IN_PLACE, sum_A3, n_shells, MPI_DOUBLE, MPI_SUM, sim.app_comm);
+  MPI_Allreduce(MPI_IN_PLACE, counts, n_shells, MPI_UNSIGNED_LONG, MPI_SUM, sim.app_comm);
+
+  if(sim.rank==0 and not sim.muteAll)
+  {
+    std::vector<double> buffer;
+    buffer.insert(buffer.end(), sum_S2, sum_S2 + n_shells);
+    buffer.insert(buffer.end(), sum_S3, sum_S3 + n_shells);
+    buffer.insert(buffer.end(), sum_S4, sum_S4 + n_shells);
+    buffer.insert(buffer.end(), sum_S6, sum_S6 + n_shells);
+    buffer.insert(buffer.end(), sum_A3, sum_A3 + n_shells);
+    buffer.insert(buffer.end(), counts, counts + n_shells); // to double
+    FILE * pFile = fopen ("structureFunctionsAnalysis.raw", "ab");
+    fwrite (buffer.data(), sizeof(double), buffer.size(), pFile);
     fflush(pFile); fclose(pFile);
   }
 

@@ -16,6 +16,8 @@
 
 CubismUP_3D_NAMESPACE_BEGIN
 
+//#define ENERGY_FLUX_SPECTRUM
+
 template <class T>
 inline T pow2(const T val) {
     return val*val;
@@ -66,8 +68,12 @@ protected:
   bool bAllocFwd = false;
   bool bAllocBwd = false;
 
-  Real * data_u, * data_v, * data_w;
-  // * data_cs2;
+  Real * data_u = nullptr;
+  Real * data_v = nullptr;
+  Real * data_w = nullptr;
+  #ifdef ENERGY_FLUX_SPECTRUM
+  Real * data_j = nullptr;
+  #endif
 
 public:
   const MPI_Comm m_comm = grid.getCartComm();

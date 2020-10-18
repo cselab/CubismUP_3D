@@ -314,7 +314,8 @@ struct Upwind3rd
   const Real invU = 1 / std::max(EPS, _sim.uMax_measured);
   Upwind3rd(const SimulationData& s) : _sim(s) {}
 
-  template<StepType step, int dir> Real diffx(LabMPI& L, const FluidBlock& o, const Real uAbs[3], const int ix, const int iy, const int iz) const {
+  template<StepType step, int dir>
+  inline Real diffx(LabMPI& L, const FluidBlock& o, const Real uAbs[3], const int ix, const int iy, const int iz) const {
     const Real ucc = inp<step,dir>(L,ix,iy,iz);
     const Real um1 = inp<step,dir>(L,ix-1,iy,iz), um2 = inp<step,dir>(L,ix-2,iy,iz);
     const Real up1 = inp<step,dir>(L,ix+1,iy,iz), up2 = inp<step,dir>(L,ix+2,iy,iz);
@@ -329,7 +330,8 @@ struct Upwind3rd
       return uAbs[0]>0? 2*up1 +3*ucc -6*um1 +um2 : -up2 +6*up1 -3*ucc -2*um1;
     #endif
   }
-  template<StepType step, int dir> Real diffy(LabMPI& L, const FluidBlock& o, const Real uAbs[3], const int ix, const int iy, const int iz) const {
+  template<StepType step, int dir>
+  inline Real diffy(LabMPI& L, const FluidBlock& o, const Real uAbs[3], const int ix, const int iy, const int iz) const {
     const Real ucc = inp<step,dir>(L,ix,iy,iz);
     const Real um1 = inp<step,dir>(L,ix,iy-1,iz), um2 = inp<step,dir>(L,ix,iy-2,iz);
     const Real up1 = inp<step,dir>(L,ix,iy+1,iz), up2 = inp<step,dir>(L,ix,iy+2,iz);
@@ -344,7 +346,8 @@ struct Upwind3rd
       return uAbs[1]>0? 2*up1 +3*ucc -6*um1 +um2 : -up2 +6*up1 -3*ucc -2*um1;
     #endif
   }
-  template<StepType step, int dir> Real diffz(LabMPI& L, const FluidBlock& o, const Real uAbs[3], const int ix, const int iy, const int iz) const {
+  template<StepType step, int dir>
+  inline Real diffz(LabMPI& L, const FluidBlock& o, const Real uAbs[3], const int ix, const int iy, const int iz) const {
     const Real ucc = inp<step,dir>(L,ix,iy,iz);
     const Real um1 = inp<step,dir>(L,ix,iy,iz-1), um2 = inp<step,dir>(L,ix,iy,iz-2);
     const Real up1 = inp<step,dir>(L,ix,iy,iz+1), up2 = inp<step,dir>(L,ix,iy,iz+2);
@@ -359,7 +362,8 @@ struct Upwind3rd
       return uAbs[2]>0? 2*up1 +3*ucc -6*um1 +um2 : -up2 +6*up1 -3*ucc -2*um1;
     #endif
   }
-  template<StepType step, int dir> Real   lap(LabMPI& L, const FluidBlock& o, const int ix, const int iy, const int iz) const {
+  template<StepType step, int dir>
+  inline Real   lap(LabMPI& L, const FluidBlock& o, const int ix, const int iy, const int iz) const {
     return  inp<step,dir>(L,ix+1,iy,iz) + inp<step,dir>(L,ix-1,iy,iz)
           + inp<step,dir>(L,ix,iy+1,iz) + inp<step,dir>(L,ix,iy-1,iz)
           + inp<step,dir>(L,ix,iy,iz+1) + inp<step,dir>(L,ix,iy,iz-1)
@@ -532,7 +536,7 @@ void AdvectionDiffusion::operator()(const double dt)
   else
   {
     if(sim.bRungeKutta23) {
-      sim.startProfiler("AdvDiff Kernel");
+      sim.startProfiler("AdvDiff23 Kernel");
       if(sim.bAdvection3rdOrder) {
         const KernelAdvectDiffuse<RK1, Upwind3rd> K1(sim);
         compute(K1);
@@ -545,10 +549,12 @@ void AdvectionDiffusion::operator()(const double dt)
         compute(K2);
       }
       sim.stopProfiler();
-      sim.startProfiler("AdvDiff copy");
-      const UpdateAndCorrectInflow U(sim);
-      U.operate<false>();
-      sim.stopProfiler();
+      if(not sim.bUseFourierBC) {
+        sim.startProfiler("AdvDiff copy");
+        const UpdateAndCorrectInflow U(sim);
+        U.operate<false>();
+        sim.stopProfiler();
+      }
     } else {
       sim.startProfiler("AdvDiff Kernel");
       if(sim.bAdvection3rdOrder) {

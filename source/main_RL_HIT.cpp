@@ -23,7 +23,6 @@
 #include <sstream>
 
 using Real = cubismup3d::Real;
-static constexpr Real rew_baseline = - 1000.0;
 #define GIVE_LOCL_STATEVARS
 #define GIVE_GRID_STATEVARS
 
@@ -108,7 +107,7 @@ inline void app_main(
   // If every grid point is an agent: probably will allocate too much memory
   // and crash because smarties allocates a trajectory for each point
   // If only one agent: sequences will be garbled together and cannot
-  // send clean Sequences.
+  // send clean Episodes to smarties' learning algorithms.
   // Also, rememebr that separate agents are thread safe!
   // let's say that each fluid block has one agent
   const int nAgentPerBlock = 1;
@@ -172,10 +171,11 @@ inline void app_main(
     const Real timeUpdateLES = tau_eta / LES_RL_FREQ_A;
     const Real timeSimulationMax = LES_RL_N_TSIM * tau_integral;
     const int maxNumUpdatesPerSim = timeSimulationMax / timeUpdateLES;
-    if (0) { // enable all dumping. //  && wrank != 1
+    if (bEvaluating) { // enable all dumping. //  && wrank != 1
       sim.sim.b3Ddump = true;  sim.sim.muteAll  = false;
       sim.sim.b2Ddump = false; sim.sim.saveFreq = 0;
-      sim.sim.verbose = true;  sim.sim.saveTime = timeUpdateLES;
+      //sim.sim.verbose = true;  sim.sim.saveTime = timeUpdateLES;
+      sim.sim.verbose = true;  sim.sim.saveTime = tau_integral;
     }
     printf("Reset simulation up to time=0 with SGS for eps:%f nu:%f Re:%f. "
            "Max %d action turns per simulation.\n", target.eps,

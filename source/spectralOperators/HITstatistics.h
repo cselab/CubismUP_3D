@@ -20,7 +20,7 @@ struct HITstatistics
 {
   HITstatistics(const int maxGridSize, const Real maxBoxLength):
     N(maxGridSize), L(maxBoxLength),
-    k_msr(new Real[nBin]), E_msr(new Real[nBin]), cs2_msr(new Real[nBin])
+    k_msr(new Real[nBin]), E_msr(new Real[nBin]), Eflux(new Real[nBin])
   {
     //printf("maxGridSize %d %d %d\n", maxGridSize, N, nyquist);
     reset();
@@ -28,7 +28,7 @@ struct HITstatistics
   }
 
   HITstatistics(const HITstatistics&c) : N(c.N), L(c.L),
-    k_msr(new Real[nBin]), E_msr(new Real[nBin]), cs2_msr(new Real[nBin])
+    k_msr(new Real[nBin]), E_msr(new Real[nBin]), Eflux(new Real[nBin])
   {
     //printf("maxGridSize %d %d %d\n", c.N, N, nyquist);
     reset();
@@ -39,7 +39,7 @@ struct HITstatistics
   {
     delete [] k_msr;
     delete [] E_msr;
-    delete [] cs2_msr;
+    delete [] Eflux;
   }
 
   void reset()
@@ -49,7 +49,7 @@ struct HITstatistics
     tau_integral = 0; l_integral = 0;
     lambda = 0; uprime = 0; Re_lambda = 0;
     memset(E_msr, 0, nBin * sizeof(Real));
-    memset(cs2_msr, 0, nBin * sizeof(Real));
+    memset(Eflux, 0, nBin * sizeof(Real));
   }
 
   void updateDerivedQuantities(const Real _nu, const Real _dt,
@@ -147,7 +147,7 @@ struct HITstatistics
   Real dt = 0, nu = 0;
   Real * const k_msr;
   Real * const E_msr;
-  Real * const cs2_msr;
+  Real * const Eflux;
 };
 
 

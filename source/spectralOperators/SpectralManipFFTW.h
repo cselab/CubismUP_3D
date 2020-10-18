@@ -20,8 +20,15 @@ class SpectralManipFFTW : public SpectralManip
   ptrdiff_t alloc_local=0;
   ptrdiff_t local_n0=0, local_0_start=0;
   ptrdiff_t local_n1=0, local_1_start=0;
-  void * fwd_u, * fwd_v, * fwd_w, * fwd_cs2;
-  void * bwd_u, * bwd_v, * bwd_w;
+  void * fwd_u = nullptr;
+  void * fwd_v = nullptr;
+  void * fwd_w = nullptr;
+  #ifdef ENERGY_FLUX_SPECTRUM
+  void * fwd_j = nullptr;
+  #endif
+  void * bwd_u = nullptr;
+  void * bwd_v = nullptr;
+  void * bwd_w = nullptr;
 
 public:
 

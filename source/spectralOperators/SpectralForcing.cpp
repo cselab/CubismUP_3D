@@ -13,6 +13,34 @@
 CubismUP_3D_NAMESPACE_BEGIN
 using namespace cubism;
 
+#if defined(ENERGY_FLUX_SPECTRUM) && ENERGY_FLUX_SPECTRUM == 1
+struct KernelComputeEnergyFlux
+{
+  const std::array<int, 3> stencil_start = {-1,-1,-1}, stencil_end = {2, 2, 2};
+  const StencilInfo stencil{-1,-1,-1, 2,2,2, false, {FE_U,FE_V,FE_W}};
+
+  template <typename Lab, typename BlockType>
+  void operator()(Lab& lab, const BlockInfo& info, BlockType& o) const
+  {
+    const Real h = info.h_gridpoint, fac = 1.0/(4*h*h);
+    for (int iz = 0; iz < FluidBlock::sizeZ; ++iz)
+    for (int iy = 0; iy < FluidBlock::sizeY; ++iy)
+    for (int ix = 0; ix < FluidBlock::sizeX; ++ix) {
+      const FluidElement &LW=lab(ix-1,iy,iz), &LE=lab(ix+1,iy,iz);
+      const FluidElement &LS=lab(ix,iy-1,iz), &LN=lab(ix,iy+1,iz);
+      const FluidElement &LF=lab(ix,iy,iz-1), &LB=lab(ix,iy,iz+1);
+      const Real dudx = LE.u-LW.u, dvdx = LE.v-LW.v, dwdx = LE.w-LW.w;
+      const Real dudy = LN.u-LS.u, dvdy = LN.v-LS.v, dwdy = LN.w-LS.w;
+      const Real dudz = LB.u-LF.u, dvdz = LB.v-LF.v, dwdz = LB.w-LF.w;
+      const Real SijSij2 = (2*dudx*dudx + (dudy+dvdx)*(dudy+dvdx)
+                          + 2*dvdy*dvdy + (dudz+dwdx)*(dudz+dwdx)
+                          + 2*dwdz*dwdz + (dwdy+dvdz)*(dwdy+dvdz)) * fac;
+      o(ix,iy,iz).tmpU = o(ix,iy,iz).chi * h*h * std::pow(SijSij2, 1.5);
+    }
+  }
+};
+#endif
+
 SpectralForcing::SpectralForcing(SimulationData & s) : Operator(s)
 {
   initSpectralAnalysisSolver(s);
@@ -25,6 +53,11 @@ void SpectralForcing::operator()(const double dt)
   sim.startProfiler("SpectralForcing");
   SpectralManip & sM = * sim.spectralManip;
   HITstatistics & stats = sM.stats;
+
+  #if defined(ENERGY_FLUX_SPECTRUM) && ENERGY_FLUX_SPECTRUM == 1
+    const KernelComputeEnergyFlux K;
+    compute(K);
+  #endif
 
   _cub2fftw();
 
@@ -80,6 +113,9 @@ void SpectralForcing::_cub2fftw() const
   Real * const data_u = sM.data_u;
   Real * const data_v = sM.data_v;
   Real * const data_w = sM.data_w;
+  #ifdef ENERGY_FLUX_SPECTRUM
+    Real * const data_j = sM.data_j;
+  #endif
 
   #pragma omp parallel for schedule(static)
   for(size_t i=0; i<NlocBlocks; ++i) {
@@ -92,6 +128,13 @@ void SpectralForcing::_cub2fftw() const
       data_u[src_index] = b(ix,iy,iz).u;
       data_v[src_index] = b(ix,iy,iz).v;
       data_w[src_index] = b(ix,iy,iz).w;
+      #ifdef ENERGY_FLUX_SPECTRUM
+        #if ENERGY_FLUX_SPECTRUM == 1
+          data_j[src_index] = b(ix,iy,iz).tmpU;
+        #else
+          data_j[src_index] = b(ix,iy,iz).chi;
+        #endif
+      #endif
     }
   }
 }

@@ -2,7 +2,7 @@ CXX=CC
 LD=CC
 
 ACCFFT_ROOT=../accfft/build/
-accfft?=true
+accfft?=false
 
 ifeq "$(compiler)" "intel"
 #CPPFLAGS += -dynamic
@@ -19,4 +19,4 @@ ifeq "$(accfft)" "true"
 LIBS += $(CRAY_CUDATOOLKIT_POST_LINK_OPTS)
 endif
 
-#CPPFLAGS += -DCUP_ASYNC_DUMP
+CPPFLAGS += -DCUP_ASYNC_DUMP

@@ -36,6 +36,8 @@
 
 CubismUP_3D_NAMESPACE_BEGIN
 
+//#define ENERGY_FLUX_SPECTRUM 1
+
 enum { FE_CHI = 0, FE_U, FE_V, FE_W, FE_P, FE_TMPU, FE_TMPV, FE_TMPW };
 struct FluidElement
 {

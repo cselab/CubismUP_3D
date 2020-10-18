@@ -75,7 +75,8 @@ SimulationData::SimulationData(MPI_Comm mpicomm, ArgumentParser &parser)
   bChannelFixedMassFlux = parser("-channelFixedMassFlux").asBool(false);
 
   bRungeKutta23 = parser("-RungeKutta23").asBool(false);
-  bAdvection3rdOrder = parser("-Advection3rdOrder").asBool(true);
+  //bAdvection3rdOrder = parser("-Advection3rdOrder").asBool(true);
+  bAdvection3rdOrder = parser("-Advection3rdOrder").asBool(false);
 
   uMax_forced = parser("-uMax_forced").asDouble(0.0);
 

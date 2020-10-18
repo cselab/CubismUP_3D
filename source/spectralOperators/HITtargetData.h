@@ -62,7 +62,7 @@ struct HITtargetData
     std::string line; char arg[32]; double stdev, _dt;
     std::string fpath = smartiesFolderStructure? "../../" : "./";
     std::ifstream file(fpath + "scalars_" + paramspec);
-    if (!file.is_open()) {
+    if (! file.good()) {
       printf("scalars FILE NOT FOUND\n");
       holdsTargetData = false;
       return;
@@ -128,7 +128,7 @@ struct HITtargetData
     logE_mean.clear(); mode.clear();
     std::string fpath = smartiesFolderStructure? "../../" : "./";
     std::ifstream file(fpath + "spectrumLogE_" + paramspec);
-    if (!file.is_open()) {
+    if (!file.good()) {
       printf("spectrumLogE FILE NOT FOUND\n");
       holdsTargetData = false;
       return;
@@ -153,22 +153,23 @@ struct HITtargetData
         nModes, std::vector<double>(nModes,0) );
     std::string fpath = smartiesFolderStructure? "../../" : "./";
     std::ifstream file(fpath + "invCovLogE_" + paramspec);
-    if (!file.is_open()) {
+    if (!file.good()) {
       printf("invCovLogE FILE NOT FOUND\n");
       holdsTargetData = false;
       return;
     }
 
-    int j = 0;
+    size_t j = 0;
     while (std::getline(file, line)) {
-        int i = 0;
+        size_t i = 0;
         std::istringstream linestream(line);
         while (std::getline(linestream, line, ','))
           logE_invCov[j][i++] = std::stof(line);
-        assert(i >= nBin);
+        assert(i >= (size_t) nBin);
         j++;
     }
-    assert(j >= nBin);
+    assert(j >= (size_t) nBin);
+    nModes = std::min(j, nModes);
     file.close();
     file.open(fpath + "stdevLogE_" + paramspec);
     if (!file.is_open()) {
@@ -182,6 +183,8 @@ struct HITtargetData
         sscanf(line.c_str(), "%le", & logE_stdDev.back() );
     }
     assert((int) logE_stdDev.size() >= nBin);
+    nModes = std::min(logE_stdDev.size(), nModes);
+    printf("found %lu out of %d modes\n", nModes, nBin);
     //for (int i=0; i<nBin; ++i)  printf("%f %f %f\n", mode[i], logE_mean[i], logE_stdDev[i]);
     fflush(0);
   }
@@ -193,8 +196,9 @@ struct HITtargetData
 
   static std::vector<std::string> readTargetSpecs(std::string paramsList)
   {
-    std::stringstream ss(paramsList);
     std::vector<std::string> tokens;
+    if (paramsList == "") return tokens;
+    std::stringstream ss(paramsList);
     std::string item;
     while (getline(ss, item, ',')) tokens.push_back(item);
     return tokens;
@@ -206,8 +210,9 @@ struct HITtargetData
     for (int i=0; i<stats.nBin; ++i) logE[i] = std::log(stats.E_msr[i]);
     const long double fac = 0.5 / stats.nBin;
     long double dev = 0;
-    for (int j=0; j<stats.nBin; ++j)
-      for (int i=0; i<stats.nBin; ++i) {
+    const size_t N = std::min((size_t) stats.nBin, nModes);
+    for (size_t j=0; j<N; ++j)
+      for (size_t i=0; i<N; ++i) {
         const long double dLogEi = logE[i] - logE_mean[i];
         const long double dLogEj = logE[j] - logE_mean[j];
         dev += fac * dLogEj * logE_invCov[j][i] * dLogEi;
@@ -223,7 +228,8 @@ struct HITtargetData
   {
     long double ret = 0;
     const long double fac = 0.5 / stats.nBin;
-    for (int i=0; i<stats.nBin; ++i) {
+    const size_t N = std::min((size_t) stats.nBin, nModes);
+    for (size_t i=0; i<N; ++i) {
       const long double dLogEi = std::log(stats.E_msr[i]) - logE_mean[i];
       ret += fac * std::pow(dLogEi / logE_stdDev[i], 2);
     }
@@ -233,7 +239,8 @@ struct HITtargetData
   {
     long double ret = 0;
     const long double fac = 0.5 / stats.nBin;
-    for (int i=0; i<stats.nBin; ++i) {
+    const size_t N = std::min((size_t) stats.nBin, nModes);
+    for (size_t i=0; i<N; ++i) {
       const long double dLogEi = std::log(stats.E_msr[i]) - logE_mean[i];
       ret += fac * std::pow(dLogEi / logE_stdDev[i], 2);
       //ret += arg>4 ? std::exp(-2.0)/(arg-1) : std::exp(-arg);
@@ -288,7 +295,7 @@ struct HITtargetData
     size_t & pSamplesCount, long double & avgP, long double & m2P,
     const Real CS, const bool bPrint = true)
   {
-    const double newP = computeLogP(stats);
+    const double newP = - computeDiagLogArg(stats);
     pSamplesCount ++;
     assert(pSamplesCount > 0);
     const auto alpha = 1.0 / (long double) pSamplesCount;
@@ -307,6 +314,7 @@ struct HITtargetData
 };
 
 CubismUP_3D_NAMESPACE_END
+
 #endif
 
 #if 0
@@ -337,3 +345,4 @@ inline void updateGradScaling(const cubismup3d::SimulationData& sim,
   else scaling_factor = (1-beta) * scaling_factor + beta * newScaling;
 }
 #endif
+
