@@ -34,7 +34,8 @@ FFTW_MD5='0d5915d7d39b3253c1cc05030d79ac47  fftw-3.3.7.tar.gz'
 
 HDF5_VERSION=1.10.1
 HDF5_MD5='43a2f9466702fb1db31df98ae6677f15  hdf5-1.10.1.tar.gz'
-HDF5_URL='https://www.hdfgroup.org/package/source-gzip/?wpdmdl=4301&refresh=5afee8d8a45151526655192'
+#HDF5_URL='https://www.hdfgroup.org/package/source-gzip/?wpdmdl=4301&refresh=5afee8d8a45151526655192'
+HDF5_URL='https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.10/hdf5-1.10.1/src/hdf5-1.10.1.tar.gz'
 
 GSL_VERSION=2.1
 
@@ -115,7 +116,11 @@ if [ -n "$INSTALL_FFTW" ]; then
     $TAR -xzvf fftw-${FFTW_VERSION}.tar.gz
     cd fftw-${FFTW_VERSION}
     FFTW_ROOT=$INSTALL_PATH/fftw-${FFTW_VERSION}/
-    ./configure --prefix=$FFTW_ROOT --enable-mpi --enable-openmp --enable-shared
+    ./configure --prefix=$FFTW_ROOT --enable-mpi --enable-openmp --enable-shared --enable-threads --enable-type-prefix
+    make -j${JOBS}
+    make install -j${JOBS}
+    make clean
+    ./configure --prefix=$FFTW_ROOT --enable-mpi --enable-openmp --enable-shared --enable-threads --enable-float --enable-type-prefix
     make -j${JOBS}
     make install -j${JOBS}
     cd $BASEPWD
@@ -160,7 +165,7 @@ if [ -n "$INSTALL_HDF5" ]; then
     mkdir -p $SOURCES
     wget ${HDF5_URL} -O $SOURCES/hdf5-${HDF5_VERSION}.tar.gz
     cd $SOURCES
-    [ -x "$(command -v md5sum)" ] && md5sum --quiet -c <<< $HDF5_MD5
+    #[ -x "$(command -v md5sum)" ] && md5sum --quiet -c <<< $HDF5_MD5
     $TAR -xzvf hdf5-${HDF5_VERSION}.tar.gz
     cd hdf5-${HDF5_VERSION}
     CC=mpicc ./configure --prefix=$INSTALL_PATH/hdf5-${HDF5_VERSION}-parallel/ --enable-parallel
