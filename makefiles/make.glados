@@ -1,0 +1,11 @@
+CXX=mpic++
+LD=mpic++
+NVCC=/usr/local/cuda-12.6/bin/nvcc
+NVFLAGS += -std=c++14 -code=sm_80 -arch=compute_80
+FFTW_ROOT=/scratch/qmale/CubismUP_3D/dependencies/build/fftw-3.3.7
+HDF5_ROOT=/scratch/qmale/CubismUP_3D/dependencies/build/hdf5-1.10.1-parallel
+ACCFFT_ROOT=/scratch/qmale/CubismUP_3D/dependencies/build/accfft
+LIBS += -L${CUDA_HOME}/lib64
+CPPFLAGS += -I${CUDA_HOME}/include
+LIBS += -L${CUDA_HOME}/lib64 -lcuda -lcudart
+CPPFLAGS+= -Wno-cast-function-type -Wno-unused-variable

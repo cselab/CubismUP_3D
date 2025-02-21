@@ -20,6 +20,9 @@ endif
 ifneq "$(findstring eu-,$(shell hostname))" ""
 	include make.euler
 endif
+ifneq "$(findstring glados,$(shell hostname))" ""
+	include make.glados
+endif
 
 # this only affects amount of memory allocated by block processing:
 nthreads ?= 24 # needs to be modified if user wants to use more threads per rank
@@ -86,8 +89,8 @@ CPPFLAGS += -I../Cubism/include/
 LDFLAGS = $(CPPFLAGS)
 
 BUILDDIR = .
-#SRC_DIR = $(BUILDDIR)/../source/
-SRC_DIR = $(sort $(dir $(wildcard $(BUILDDIR)/../source/*/)))
+SRC_DIR = $(BUILDDIR)/../source/
+SRC_DIR += $(sort $(dir $(wildcard $(BUILDDIR)/../source/*/)))
 CUBISM_DIR = $(BUILDDIR)/../Cubism/src/
 
 OBJECTS = ObstacleFactory.o Obstacle.o ObstacleVector.o Ellipsoid.o Cylinder.o \
@@ -143,6 +146,8 @@ else
 	FFTW_LIBS += -lfftw3_mpi -lfftw3_omp -lfftw3
 endif
 
+LIBS += $(FFTW_LIBS)
+
 #################################################
 # ACCFFT
 #################################################
@@ -165,7 +170,6 @@ ifeq "$(accfft)" "true"
 else
 	OBJECTS += PoissonSolverUnbounded.o PoissonSolverPeriodic.o
 	NVOBJECTS =
-	LIBS += $(FFTW_LIBS)
 endif
 
 #################################################
